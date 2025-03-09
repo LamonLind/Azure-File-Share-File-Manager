@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Azure File Manager</title>
+    <style>
+        /* General Reset */
+        body, h1, p, button, input {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* Body Styling */
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f9f9f9;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+        }
+
+        /* Header Styling */
+        header {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+
+        header h1 {
+            font-size: 1.8rem;
+            color: #0078d4;
+            text-align: center;
+        }
+
+        nav {
+            display: flex;
+            gap: 10px;
+        }
+
+        button, label {
+            padding: 10px 15px;
+            background-color: #0078d4;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        button:hover, label:hover {
+            background-color: #005a9e;
+        }
+
+        #currentPathDisplay {
+            margin-top: 10px;
+            font-weight: bold;
+        }
+
+        /* Main Content */
+        main {
+            margin-top: 20px;
+        }
+
+        .file-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            animation: fadeIn 0.5s ease;
+        }
+
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+            animation: slideIn 0.5s ease;
+        }
+
+        .file-item:hover {
+            background-color: #f4f4f4;
+            transform: translateY(-2px);
+        }
+
+        /* Dropdown Styling */
+        .dropdown {
+            position: relative;
+        }
+
+        .dropdown-menu {
+            display: none;
+            position: absolute;
+            top: 30px;
+            right: 0;
+            background-color: white;
+            border: 1px solid #ddd;
+            box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+            border-radius: 5px;
+            z-index: 1000;
+            min-width: 150px;
+        }
+
+        .dropdown-menu a {
+            display: block;
+            padding: 10px;
+            text-decoration: none;
+            color: #333;
+        }
+
+        .dropdown-menu a:hover {
+            background-color: #f0f0f0;
+        }
+
+        .dropdown:hover .dropdown-menu {
+            display: block;
+        }
+
+        /* ✅ Progress Bar Styling */
+        #progressBarContainer {
+            width: 100%;
+            background-color: #f3f3f3;
+            height: 30px;
+            border-radius: 5px;
+            overflow: hidden;
+            display: none; /* Initially hidden */
+        }
+
+        #progressBar {
+            height: 100%;
+            width: 0;
+            background-color: #4caf50;
+            text-align: center;
+            line-height: 30px;
+            color: white;
+            font-weight: bold;
+            transition: width 0.3s ease-in-out; /* Smooth transition */
+        }
+
+        #uploadProgress, #uploadProgress2 {
+            height: 100%;
+            width: 0;
+            background-color: #4CAF50;
+            border-radius: 10px;
+            text-align: center;
+            line-height: 20px;
+            color: white;
+            font-weight: bold;
+            transition: width 0.4s ease-in-out;
+        }
+
+        /* ✅ Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes slideIn {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        /* ✅ Responsive Design */
+        @media (max-width: 600px) {
+            header h1 {
+                font-size: 1.5rem;
+            }
+
+            button, label {
+                font-size: 0.9rem;
+            }
+
+            nav {
+                flex-wrap: wrap;
+                gap: 5px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Azure File Manager</h1>
+        <nav>
+            <button onclick="goBack()">⬅️ Back</button>
+            <button onclick="createFolder()">➕ Create Folder</button>
+            <label for="fileUpload">
+                📤 Upload File
+                <input id="fileUpload" type="file" multiple style="display: none;" onchange="handleFileSelect(event)">
+            </label>
+        </nav>
+        <strong id="currentPathDisplay">Home</strong>
+    </header>
+
+    <main>
+        <!-- Progress Bar 1 -->
+        <div id="progressBarContainer">
+            <div id="progressBar">
+                <div id="uploadProgress"></div>
+            </div>
+        </div>
+
+        <!-- Progress Bar 2 -->
+        <div id="progressBarContainer2">
+            <div id="progressBar2">
+                <div id="uploadProgress2"></div>
+            </div>
+        </div>
+
+        <!-- File List -->
+        <div id="fileList" class="file-list"></div>
+    </main>
+
+    <script>
+        const normalSasUrl = "PASTE ALL PERMISSION SAASURL";
+        const readOnlySasUrl = "PASTE READ-ONLY SAAS URL";
+        const containerUrl = normalSasUrl.split('?')[0];
+        let currentPath = "";
+
+        // List files and folders
+        async function listFiles(path = "") {
+            currentPath = path;
+            document.getElementById("currentPathDisplay").textContent = path || "Home";
+
+            const response = await fetch(`${containerUrl}/${path}?restype=directory&comp=list&${normalSasUrl.split('?')[1]}`);
+            const text = await response.text();
+            const parser = new DOMParser();
+            const xml = parser.parseFromString(text, "application/xml");
+            const files = xml.getElementsByTagName("File");
+            const directories = xml.getElementsByTagName("Directory");
+            const fileList = document.getElementById("fileList");
+            fileList.innerHTML = "";
+
+            // List Directories
+            for (let dir of directories) {
+                const name = dir.getElementsByTagName("Name")[0].textContent;
+                fileList.innerHTML += `
+                    <div class="file-item">
+                        📁 <strong>${name}</strong>
+                        <button onclick="navigateToFolder('${path}${name}/')">Open</button>
+                    </div>`;
+            }
+
+            // List Files with Dropdown Options
+            for (let file of files) {
+                const name = file.getElementsByTagName("Name")[0].textContent;
+                const downloadUrl = `${containerUrl}/${path}${name}?${readOnlySasUrl.split('?')[1]}`;
+                fileList.innerHTML += `
+                    <div class="file-item">
+                        📄 ${name}
+                        <div class="dropdown">
+                            ⋮
+                            <div class="dropdown-menu">
+                                <a href="${downloadUrl}" download="${name}">Download</a>
+                                <a onclick="confirmDelete('${name}')">Delete</a>
+                                <a onclick="copyLink('${downloadUrl}')">Copy Link</a>
+                                <a onclick="renameFile('${name}')">Rename</a>
+                            </div>
+                        </div>
+                    </div>`;
+            }
+
+            if (!files.length && !directories.length) {
+                fileList.innerHTML = "<p>No files or folders found.</p>";
+            }
+        }
+
+        // Navigate into a folder
+        function navigateToFolder(folderName) {
+            listFiles(folderName);
+        }
+
+        // Go back to the previous folder
+        function goBack() {
+            if (!currentPath) return;
+            const pathParts = currentPath.split('/').filter(part => part);
+            pathParts.pop();
+            listFiles(pathParts.join('/') + (pathParts.length ? '/' : ''));
+        }
+
+        // Create a new folder
+        async function createFolder() {
+            const folderName = prompt("Enter folder name:");
+            if (!folderName) return;
+
+            const folderPath = `${currentPath}${folderName}/`;
+            const folderUrl = `${containerUrl}/${folderPath}?restype=directory&${normalSasUrl.split('?')[1]}`;
+
+            const response = await fetch(folderUrl, {
+                method: "PUT",
+                headers: { 'Content-Length': '0' }
+            });
+
+            if (response.ok) {
+                alert("Folder created successfully!");
+                listFiles(currentPath);
+            } else {
+                alert("Failed to create folder.");
+            }
+        }
+
+        // Handle file selection and upload
+        function handleFileSelect(event) {
+            const files = event.target.files;
+            if (files.length > 0) {
+                uploadFiles(files);
+            } else {
+                alert('No files selected');
+            }
+        }
+
+        // Upload files with proper headers and progress tracking
+        async function uploadFiles(files) {
+            const progressBar = document.getElementById("progressBar");
+            const progressContainer = document.getElementById("progressBarContainer");
+
+            progressContainer.style.display = "block";
+            progressBar.style.width = "0%";
+            progressBar.textContent = "0%";
+
+            let totalSize = Array.from(files).reduce((acc, file) => acc + file.size, 0);
+            let uploadedSize = 0;
+
+            // Iterate through each file for uploading
+            for (const file of files) {
+                const fileUrl = `${containerUrl}/${currentPath}${file.name}?${normalSasUrl.split('?')[1]}`;
+
+                // Step 1: Create empty file (initiate the file creation)
+                await fetch(fileUrl, {
+                    method: "PUT",
+                    headers: {
+                        'x-ms-type': 'file',
+                        'x-ms-content-length': file.size,
+                        'Content-Length': '0',
+                        'x-ms-version': '2022-11-02'
+                    }
+                });
+
+                // Step 2: Upload content in chunks
+                const chunkSize = 4 * 1024 * 1024; // 4 MB per chunk
+                let start = 0;
+
+                while (start < file.size) {
+                    const chunk = file.slice(start, start + chunkSize);
+                    const uploadHeaders = {
+                        'x-ms-write': 'update',
+                        'x-ms-version': '2022-11-02',
+                        'Content-Length': chunk.size.toString(),
+                        'Range': `bytes=${start}-${start + chunk.size - 1}`
+                    };
+
+                    // Upload the chunk
+                    await fetch(`${fileUrl}&comp=range`, { method: "PUT", headers: uploadHeaders, body: chunk });
+
+                    // Update uploaded size and progress
+                    uploadedSize += chunk.size;
+                    const progress = Math.round((uploadedSize / totalSize) * 100); // Ensure it rounds properly
+                    progressBar.style.width = `${progress}%`;
+                    progressBar.textContent = `${progress}%`;
+
+                    // Move to the next chunk
+                    start += chunk.size;
+                }
+            }
+
+            alert("Files uploaded successfully!");
+            progressContainer.style.display = "none";
+            listFiles(currentPath);
+        }
+
+        // Confirm delete a file or folder
+        async function confirmDelete(name) {
+            if (confirm(`Are you sure you want to delete ${name}?`)) {
+                const deleteUrl = `${containerUrl}/${currentPath}${name}?${normalSasUrl.split('?')[1]}`;
+                const response = await fetch(deleteUrl, { method: 'DELETE' });
+                if (response.ok) {
+                    alert("Deleted successfully!");
+                    listFiles(currentPath);
+                } else {
+                    alert("Failed to delete file/folder.");
+                }
+            }
+        }
+
+        // Rename a file using Azure Copy Method
+        async function renameFile(oldName) {
+            const newName = prompt("Enter the new name for the file:", oldName);
+            if (!newName || newName === oldName) return;
+
+            const sourceUrl = `${containerUrl}/${currentPath}${oldName}?${normalSasUrl.split('?')[1]}`;
+            const destinationUrl = `${containerUrl}/${currentPath}${newName}?${normalSasUrl.split('?')[1]}`;
+
+            const headers = {
+                'x-ms-version': '2022-11-02',
+                'x-ms-copy-source': sourceUrl
+            };
+
+            // Step 1: Copy the file with the new name
+            const copyResponse = await fetch(destinationUrl, { method: 'PUT', headers });
+            if (!copyResponse.ok) {
+                alert("Failed to rename file.");
+                return;
+            }
+
+            // Step 2: Delete the old file
+            const deleteResponse = await fetch(sourceUrl, { method: 'DELETE' });
+            if (deleteResponse.ok) {
+                alert("File renamed successfully!");
+                listFiles(currentPath);
+            } else {
+                alert("Renamed but failed to delete the old file.");
+            }
+        }
+
+        // Copy download link to clipboard
+        function copyLink(url) {
+            navigator.clipboard.writeText(url).then(() => {
+                alert("Download link copied to clipboard!");
+            });
+        }
+
+        // Initialize file manager on page load
+        document.addEventListener("DOMContentLoaded", () => listFiles());
+    </script>
+</body>
+</html>
